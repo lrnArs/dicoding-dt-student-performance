@@ -1,4 +1,4 @@
-# Proyek Akhir: Menyelesaikan Permasalahan Perusahaan Edutech
+# Proyek Akhir: Menyelesaikan Permasalahan Institusi Pendidikan
 
 ## Business Understanding
 Institusi pendidikan sering menghadapi kesulitan dalam memonitor dan meningkatkan performa siswa secara konsisten. Dengan banyaknya variabel yang mempengaruhi hasil akademik (seperti kebiasaan belajar, kehadiran, dan faktor sosial), diperlukan pendekatan berbasis data untuk membantu pengambilan keputusan yang lebih akurat.
