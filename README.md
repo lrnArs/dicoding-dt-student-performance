@@ -45,7 +45,7 @@ streamlit run dashboard.py
 ## Business Dashboard
 Dashboard dibuat menggunakan Streamlit untuk memberikan insight terkait performa siswa secara interaktif.
 
-Access Public : [Students_Performance](https://github.com/dicodingacademy/dicoding_dataset/tree/main/students_performance)
+Access Public : [Students_Performance](http://dicoding-dt-student-performance-ehpxtef5qtgfuxztaclsf5.streamlit.app)
 
 Fitur utama dashboard: 
 
