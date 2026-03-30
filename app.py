@@ -1,7 +1,7 @@
-
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -10,9 +10,8 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-
 st.set_page_config(
-    page_title="Students' Performance Predictor",
+    page_title="Student Dropout Predictor",
     page_icon="🎓",
     layout="wide",
 )
@@ -95,7 +94,7 @@ RAW_TO_NOTEBOOK_COLS: Dict[str, str] = {
 }
 
 # ---------------------------------------------------------------------
-# Display mappings used for the output CSV and dashboard readability
+# Display mappings for output readability
 # ---------------------------------------------------------------------
 DISPLAY_MAPPINGS: Dict[str, Dict[int, str]] = {
     "Marital_status": {
@@ -195,11 +194,11 @@ DISPLAY_MAPPINGS: Dict[str, Dict[int, str]] = {
     "Tuition_fees_up_to_date": {1: "Yes", 0: "No"},
     "Scholarship_holder": {1: "Yes", 0: "No"},
     "International": {1: "Yes", 0: "No"},
-    "Status": {0: "Dropout", 1: "Enrolled", 2: "Graduate"},
+    "Status": {0: "Dropout", 1: "Graduate"},
 }
 
 # ---------------------------------------------------------------------
-# Helpers
+# Helper functions
 # ---------------------------------------------------------------------
 def canonical(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", str(name).strip().lower())
@@ -277,7 +276,7 @@ def reverse_mapping(col: str) -> Dict[str, int]:
 
 
 def map_text_to_code(series: pd.Series, col: str) -> pd.Series:
-    """Allow end-users to provide labels instead of numeric codes."""
+    """Allow end‑users to provide labels instead of numeric codes."""
     rev = reverse_mapping(col)
     if not rev:
         return series
@@ -306,13 +305,13 @@ def coerce_numeric_like_columns(df: pd.DataFrame) -> pd.DataFrame:
             df[col] = map_text_to_code(df[col], col)
 
         if df[col].dtype == object:
-            # Convert anything that looks numeric into numbers
             converted = pd.to_numeric(df[col], errors="ignore")
             df[col] = converted
     return df
 
 
 def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Exactly replicate the feature engineering from the notebook."""
     df = df.copy()
     eps = 1e-6
 
@@ -331,7 +330,7 @@ def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
     if {"Curricular_units_1st_sem_grade", "Curricular_units_2nd_sem_grade"}.issubset(df.columns):
         df["grade_avg"] = (df["Curricular_units_1st_sem_grade"] + df["Curricular_units_2nd_sem_grade"]) / 2
 
-    # Same columns dropped in the notebook
+    # Drop original columns used to create new features
     cols_to_drop = [
         "Curricular_units_1st_sem_enrolled",
         "Curricular_units_1st_sem_approved",
@@ -344,6 +343,7 @@ def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def impute_numeric_median(df: pd.DataFrame, numeric_cols: Optional[List[str]] = None) -> pd.DataFrame:
+    """Impute missing numeric values with median."""
     df = df.copy()
     if numeric_cols is None:
         numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
@@ -351,11 +351,16 @@ def impute_numeric_median(df: pd.DataFrame, numeric_cols: Optional[List[str]] = 
     for col in numeric_cols:
         if col in df.columns:
             series = pd.to_numeric(df[col], errors="coerce")
-            df[col] = series.fillna(series.median())
+            median_val = series.median()
+            if pd.notna(median_val):
+                df[col] = series.fillna(median_val)
+            else:
+                df[col] = series.fillna(0)
     return df
 
 
 def cap_numeric_bounds(df: pd.DataFrame, bounds: Dict[str, Tuple[float, float]]) -> pd.DataFrame:
+    """Apply Winsorization using pre‑computed bounds."""
     df = df.copy()
     for col, (lower, upper) in bounds.items():
         if col in df.columns:
@@ -364,17 +369,16 @@ def cap_numeric_bounds(df: pd.DataFrame, bounds: Dict[str, Tuple[float, float]])
 
 
 def align_features(df: pd.DataFrame, feature_names: List[str]) -> pd.DataFrame:
+    """Ensure the DataFrame has all expected features, in the correct order."""
     df = df.copy()
     for col in feature_names:
         if col not in df.columns:
             df[col] = 0
-    drop_cols = [c for c in df.columns if c not in feature_names and c != "Status"]
-    if drop_cols:
-        df = df.drop(columns=drop_cols, errors="ignore")
     return df[feature_names]
 
 
 def to_label(col: str, value):
+    """Convert numeric code to readable label using DISPLAY_MAPPINGS."""
     if pd.isna(value):
         return value
     mapping = DISPLAY_MAPPINGS.get(col, {})
@@ -386,6 +390,7 @@ def to_label(col: str, value):
 
 
 def add_label_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Add human‑readable label columns for columns that have a mapping."""
     out = df.copy()
     for col in DISPLAY_MAPPINGS:
         if col in out.columns:
@@ -393,28 +398,47 @@ def add_label_columns(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def round_floats(df: pd.DataFrame, decimals: int = 3) -> pd.DataFrame:
+    """Round all float columns to the specified number of decimals."""
+    df = df.copy()
+    for col in df.select_dtypes(include=[float]).columns:
+        df[col] = df[col].round(decimals)
+    return df
+
+
 def predict_from_dataframe(input_df: pd.DataFrame):
+    """Full pipeline: normalization, feature engineering, imputation, capping, prediction."""
     model, bounds, numeric_cols, feature_names, label_encoder = load_artifacts()
 
+    # 1. Normalize column names
     df = normalize_columns(input_df)
+
+    # 2. Convert text labels to codes where possible
     df = coerce_numeric_like_columns(df)
 
-    if "Status" in df.columns and df["Status"].dtype == object:
-        # Keep the raw target if present, but don't use it in prediction.
-        df["Status"] = df["Status"].astype(str).str.strip()
-
+    # 3. Feature engineering (adds derived columns, drops raw ones)
     df = engineer_features(df)
 
+    # 4. Prepare features for prediction (drop any target column if present)
     features_df = df.drop(columns=["Status"], errors="ignore")
+
+    # 5. Impute missing numeric values with median
     features_df = impute_numeric_median(features_df, numeric_cols=numeric_cols)
+
+    # 6. Apply Winsorization (capping) using pre‑computed bounds
     features_df = cap_numeric_bounds(features_df, bounds=bounds)
+
+    # 7. Align to the feature set used during training
     features_df = align_features(features_df, feature_names=feature_names)
 
+    # 8. Predict
     pred_codes = model.predict(features_df)
     pred_proba = model.predict_proba(features_df)
     pred_labels = label_encoder.inverse_transform(pred_codes)
 
+    # 9. Build output DataFrame with original input + derived + predictions
     output_df = input_df.copy()
+    # Add normalized columns and derived features for readability
     output_df = normalize_columns(output_df)
     output_df = coerce_numeric_like_columns(output_df)
     output_df = engineer_features(output_df)
@@ -422,38 +446,60 @@ def predict_from_dataframe(input_df: pd.DataFrame):
 
     output_df["Predicted_Status_Code"] = pred_codes
     output_df["Predicted_Status"] = pred_labels
+
+    # Determine class indices (assume classes are [0,1] with 1 = Graduate)
     class_to_index = {int(cls): idx for idx, cls in enumerate(model.classes_)}
-    output_df["Prob_Dropout"] = pred_proba[:, class_to_index.get(0)] if 0 in class_to_index else np.nan
-    output_df["Prob_Enrolled"] = pred_proba[:, class_to_index.get(1)] if 1 in class_to_index else np.nan
-    output_df["Prob_Graduate"] = pred_proba[:, class_to_index.get(2)] if 2 in class_to_index else np.nan
+    output_df["Prob_Dropout"] = pred_proba[:, class_to_index.get(0, 0)] if 0 in class_to_index else np.nan
+    output_df["Prob_Graduate"] = pred_proba[:, class_to_index.get(1, 1)] if 1 in class_to_index else np.nan
     output_df["Prediction_Confidence"] = np.max(pred_proba, axis=1)
 
-    # Save a few helpful display labels for the target, too.
-    output_df["Predicted_Status_label"] = output_df["Predicted_Status"]
+    # Add risk group based on probability of Dropout
+    def risk_level(prob_dropout):
+        if pd.isna(prob_dropout):
+            return "Unknown"
+        if prob_dropout > 0.7:
+            return "High"
+        if prob_dropout > 0.3:
+            return "Medium"
+        return "Low"
+
+    output_df["Risk_Level"] = output_df["Prob_Dropout"].apply(risk_level)
+
+    # Round floats to 3 decimals
+    output_df = round_floats(output_df)
 
     return output_df
 
 
 # ---------------------------------------------------------------------
-# UI
+# Streamlit UI
 # ---------------------------------------------------------------------
-st.title("Students' Performance Predictor")
-st.caption("Reads local data.csv, runs the trained notebook model, and writes pred_data.csv.")
+st.title("Student Dropout Predictor")
+st.caption("Predicts whether a student will Dropout or Graduate (binary classification) based on academic, demographic, and socio‑economic features.")
 
+# Sidebar controls
 with st.sidebar:
     st.header("Run prediction")
     csv_path = st.text_input("Input CSV", value="data.csv")
     output_path = st.text_input("Output CSV", value="pred_data.csv")
     run_btn = st.button("Process file")
 
+    st.markdown("---")
+    if st.button("Exit Application"):
+        st.info("Exiting Streamlit app...")
+        sys.exit(0)  # Stops the Streamlit server
+
 st.markdown(
     """
     **How it works**
-    1. Load local `data.csv`.
-    2. Normalize column names to match the notebook.
-    3. Convert coded values into readable labels where the description was provided.
-    4. Apply feature engineering and model inference.
-    5. Save the result as `pred_data.csv`.
+    1. Load your local CSV file (semicolon‑separated recommended).
+    2. Normalize column names to match the training dataset.
+    3. Convert coded values into readable labels where descriptions are available.
+    4. Apply feature engineering (approval rates, failure rates, average grade).
+    5. Impute missing values with median.
+    6. Cap extreme values using pre‑computed bounds (Winsorization).
+    7. Run the trained Random Forest model.
+    8. Save predictions with probabilities and risk groups.
     """
 )
 
@@ -471,15 +517,19 @@ if run_btn:
         out_path = Path(output_path)
         pred_df.to_csv(out_path, index=False)
 
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Rows", f"{len(pred_df):,}")
-        c2.metric("Dropout", f"{int((pred_df['Predicted_Status'] == 'Dropout').sum()):,}")
-        c3.metric("Enrolled", f"{int((pred_df['Predicted_Status'] == 'Enrolled').sum()):,}")
-        c4.metric("Graduate", f"{int((pred_df['Predicted_Status'] == 'Graduate').sum()):,}")
+        # Summary metrics (only Dropout/Graduate)
+        total = len(pred_df)
+        dropout_count = int((pred_df["Predicted_Status"] == "Dropout").sum())
+        graduate_count = int((pred_df["Predicted_Status"] == "Graduate").sum())
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Total students", f"{total:,}")
+        c2.metric("Predicted Dropout", f"{dropout_count:,}")
+        c3.metric("Predicted Graduate", f"{graduate_count:,}")
 
         st.success(f"Prediction complete. Saved to {out_path.resolve()}")
 
-        st.subheader("Preview")
+        st.subheader("Preview (first 25 rows)")
         st.dataframe(pred_df.head(25), use_container_width=True)
 
         st.download_button(
@@ -497,4 +547,4 @@ if run_btn:
     except Exception as exc:
         st.exception(exc)
 else:
-    st.info("Place `data.csv` in the same folder and click **Process file**.")
+    st.info("Place your CSV file in the same folder and click **Process file**.")
