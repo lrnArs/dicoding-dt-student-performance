@@ -1,7 +1,15 @@
+# app.py - Student Dropout Predictor
+# ---------------------------------------------------------------------
+# This script loads a trained Random Forest model and pre-processing
+# artifacts, processes an input CSV file, and outputs predictions with
+# probabilities and risk levels.
+# ---------------------------------------------------------------------
+
 from __future__ import annotations
 
 import re
 import sys
+import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -10,6 +18,10 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
 st.set_page_config(
     page_title="Student Dropout Predictor",
     page_icon="🎓",
@@ -17,7 +29,7 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------------------
-# Artifact locations
+# 1. Define artifact locations (try common paths)
 # ---------------------------------------------------------------------
 ARTIFACT_CANDIDATES = [
     Path("best_model.pkl"),
@@ -51,8 +63,11 @@ LABEL_ENCODER_CANDIDATES = [
 ]
 
 # ---------------------------------------------------------------------
-# Source notebook column names
+# 2. Column mapping from raw CSV to notebook column names
 # ---------------------------------------------------------------------
+# This mapping is derived from the original notebook.
+# Keys are column names as they might appear in raw data (case insensitive, spaces/underscores normalized)
+# Values are the exact column names used in training.
 RAW_TO_NOTEBOOK_COLS: Dict[str, str] = {
     "Marital Status": "Marital_status",
     "Application mode": "Application_mode",
@@ -93,152 +108,47 @@ RAW_TO_NOTEBOOK_COLS: Dict[str, str] = {
     "Status": "Status",
 }
 
-# ---------------------------------------------------------------------
-# Display mappings for output readability
-# ---------------------------------------------------------------------
-DISPLAY_MAPPINGS: Dict[str, Dict[int, str]] = {
-    "Marital_status": {
-        1: "Single",
-        2: "Married",
-        3: "Widower",
-        4: "Divorced",
-        5: "Facto union",
-        6: "Legally separated",
-    },
-    "Application_mode": {
-        1: "1st phase - general contingent",
-        2: "Ordinance No. 612/93",
-        5: "1st phase - special contingent (Azores Island)",
-        7: "Holders of other higher courses",
-        10: "Ordinance No. 854-B/99",
-        15: "International student (bachelor)",
-        16: "1st phase - special contingent (Madeira Island)",
-        17: "2nd phase - general contingent",
-        18: "3rd phase - general contingent",
-        26: "Ordinance No. 533-A/99, item b2) (Different Plan)",
-        27: "Ordinance No. 533-A/99, item b3 (Other Institution)",
-        39: "Over 23 years old",
-        42: "Transfer",
-        43: "Change of course",
-        44: "Technological specialization diploma holders",
-        51: "Change of institution/course",
-        53: "Short cycle diploma holders",
-        57: "Change of institution/course (International)",
-    },
-    "Course": {
-        33: "Biofuel Production Technologies",
-        171: "Animation and Multimedia Design",
-        8014: "Social Service (evening attendance)",
-        9003: "Agronomy",
-        9070: "Communication Design",
-        9085: "Veterinary Nursing",
-        9119: "Informatics Engineering",
-        9130: "Equinculture",
-        9147: "Management",
-        9238: "Social Service",
-        9254: "Tourism",
-        9500: "Nursing",
-        9556: "Oral Hygiene",
-        9670: "Advertising and Marketing Management",
-        9773: "Journalism and Communication",
-        9853: "Basic Education",
-        9991: "Management (evening attendance)",
-    },
-    "Daytime_evening_attendance": {1: "Daytime", 0: "Evening"},
-    "Previous_qualification": {
-        1: "Secondary education",
-        2: "Higher education - bachelor's degree",
-        3: "Higher education - degree",
-        4: "Higher education - master's",
-        5: "Higher education - doctorate",
-        6: "Frequency of higher education",
-        9: "12th year of schooling - not completed",
-        10: "11th year of schooling - not completed",
-        12: "Other - 11th year of schooling",
-        14: "10th year of schooling",
-        15: "10th year of schooling - not completed",
-        19: "Basic education 3rd cycle (9th/10th/11th year) or equiv.",
-        38: "Basic education 2nd cycle (6th/7th/8th year) or equiv.",
-        39: "Technological specialization course",
-        40: "Higher education - degree (1st cycle)",
-        42: "Professional higher technical course",
-        43: "Higher education - master (2nd cycle)",
-    },
-    "Nacionality": {
-        1: "Portuguese",
-        2: "German",
-        6: "Spanish",
-        11: "Italian",
-        13: "Dutch",
-        14: "English",
-        17: "Lithuanian",
-        21: "Angolan",
-        22: "Cape Verdean",
-        24: "Guinean",
-        25: "Mozambican",
-        26: "Santomean",
-        32: "Turkish",
-        41: "Brazilian",
-        62: "Romanian",
-        100: "Moldova (Republic of)",
-        101: "Mexican",
-        103: "Ukrainian",
-        105: "Russian",
-        108: "Cuban",
-        109: "Colombian",
-    },
-    "Gender": {1: "Male", 0: "Female"},
-    "Displaced": {1: "Yes", 0: "No"},
-    "Educational_special_needs": {1: "Yes", 0: "No"},
-    "Debtor": {1: "Yes", 0: "No"},
-    "Tuition_fees_up_to_date": {1: "Yes", 0: "No"},
-    "Scholarship_holder": {1: "Yes", 0: "No"},
-    "International": {1: "Yes", 0: "No"},
-    "Status": {0: "Dropout", 1: "Graduate"},
-}
-
-# ---------------------------------------------------------------------
-# Helper functions
-# ---------------------------------------------------------------------
+# Build a canonical mapping (lowercase, no non‑alphanumeric) for fuzzy matching
 def canonical(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", str(name).strip().lower())
-
 
 CANONICAL_RAW_MAP = {canonical(k): v for k, v in RAW_TO_NOTEBOOK_COLS.items()}
 NOTEBOOK_COLUMNS = set(RAW_TO_NOTEBOOK_COLS.values())
 
-
+# ---------------------------------------------------------------------
+# 3. Helper functions for loading artifacts
+# ---------------------------------------------------------------------
 def locate_file(candidates: List[Path]) -> Optional[Path]:
     for candidate in candidates:
         if candidate.exists():
+            logger.info(f"Found artifact: {candidate}")
             return candidate
     return None
 
-
 @st.cache_resource
 def load_artifacts():
+    """Load model, bounds, numeric_cols, feature_names, label_encoder."""
     model_path = locate_file(ARTIFACT_CANDIDATES)
     bounds_path = locate_file(BOUNDS_CANDIDATES)
     numeric_cols_path = locate_file(NUMERIC_COLS_CANDIDATES)
     feature_names_path = locate_file(FEATURE_NAMES_CANDIDATES)
     label_encoder_path = locate_file(LABEL_ENCODER_CANDIDATES)
 
-    missing = [
-        name
-        for name, path in {
-            "best_model.pkl": model_path,
-            "bounds.pkl": bounds_path,
-            "numeric_cols.pkl": numeric_cols_path,
-            "feature_names.pkl": feature_names_path,
-            "label_encoder.pkl": label_encoder_path,
-        }.items()
-        if path is None
-    ]
+    missing = []
+    for name, path in {
+        "best_model.pkl": model_path,
+        "bounds.pkl": bounds_path,
+        "numeric_cols.pkl": numeric_cols_path,
+        "feature_names.pkl": feature_names_path,
+        "label_encoder.pkl": label_encoder_path,
+    }.items():
+        if path is None:
+            missing.append(name)
+
     if missing:
         raise FileNotFoundError(
-            "Missing model artifacts: "
-            + ", ".join(missing)
-            + ". Place them in the project root or in model/models/artifacts."
+            f"Missing model artifacts: {', '.join(missing)}. "
+            "Place them in the project root or in model/models/artifacts."
         )
 
     model = joblib.load(model_path)
@@ -246,17 +156,22 @@ def load_artifacts():
     numeric_cols = joblib.load(numeric_cols_path)
     feature_names = joblib.load(feature_names_path)
     label_encoder = joblib.load(label_encoder_path)
+
+    logger.info("All artifacts loaded successfully.")
     return model, bounds, numeric_cols, feature_names, label_encoder
 
-
+# ---------------------------------------------------------------------
+# 4. Data preprocessing (mirroring notebook)
+# ---------------------------------------------------------------------
 def read_data_file(path: Path) -> pd.DataFrame:
+    """Read CSV with semicolon separator, fallback to comma."""
     try:
         return pd.read_csv(path, sep=";")
     except Exception:
         return pd.read_csv(path)
 
-
 def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Rename columns to match notebook names using canonical mapping."""
     rename_map = {}
     for col in df.columns:
         key = canonical(col)
@@ -266,71 +181,38 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
             rename_map[col] = col
     return df.rename(columns=rename_map).copy()
 
-
-def reverse_mapping(col: str) -> Dict[str, int]:
-    forward = DISPLAY_MAPPINGS.get(col, {})
-    reverse: Dict[str, int] = {}
-    for k, v in forward.items():
-        reverse[str(v).strip().lower()] = int(k)
-    return reverse
-
-
-def map_text_to_code(series: pd.Series, col: str) -> pd.Series:
-    """Allow end‑users to provide labels instead of numeric codes."""
-    rev = reverse_mapping(col)
-    if not rev:
-        return series
-
-    def _convert(v):
-        if pd.isna(v):
-            return np.nan
-        text = str(v).strip().lower()
-        if text in rev:
-            return rev[text]
-        # Accept numeric text as well
-        try:
-            return int(float(v))
-        except Exception:
-            return v
-
-    return series.map(_convert)
-
-
-def coerce_numeric_like_columns(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.copy()
-    for col in df.columns:
-        if col == "Status":
-            continue
-        if col in DISPLAY_MAPPINGS:
-            df[col] = map_text_to_code(df[col], col)
-
-        if df[col].dtype == object:
-            converted = pd.to_numeric(df[col], errors="ignore")
-            df[col] = converted
-    return df
-
-
 def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Exactly replicate the feature engineering from the notebook."""
+    """
+    Create engineered features exactly as in the notebook.
+    The notebook uses:
+        approval_rate_1st = approved / (enrolled + epsilon)
+        failure_rate_1st = (enrolled - approved) / (enrolled + epsilon)
+        similarly for 2nd semester
+        grade_avg = (1st_grade + 2nd_grade) / 2
+    Then drops original columns used to create them.
+    """
     df = df.copy()
     eps = 1e-6
 
-    if {"Curricular_units_1st_sem_approved", "Curricular_units_1st_sem_enrolled"}.issubset(df.columns):
-        df["approval_rate_1st"] = df["Curricular_units_1st_sem_approved"] / (df["Curricular_units_1st_sem_enrolled"] + eps)
-        df["failure_rate_1st"] = (df["Curricular_units_1st_sem_enrolled"] - df["Curricular_units_1st_sem_approved"]) / (
-            df["Curricular_units_1st_sem_enrolled"] + eps
-        )
+    # 1st semester rates
+    if "Curricular_units_1st_sem_approved" in df.columns and "Curricular_units_1st_sem_enrolled" in df.columns:
+        enrolled1 = df["Curricular_units_1st_sem_enrolled"]
+        approved1 = df["Curricular_units_1st_sem_approved"]
+        df["approval_rate_1st"] = approved1 / (enrolled1 + eps)
+        df["failure_rate_1st"] = (enrolled1 - approved1) / (enrolled1 + eps)
 
-    if {"Curricular_units_2nd_sem_approved", "Curricular_units_2nd_sem_enrolled"}.issubset(df.columns):
-        df["approval_rate_2nd"] = df["Curricular_units_2nd_sem_approved"] / (df["Curricular_units_2nd_sem_enrolled"] + eps)
-        df["failure_rate_2nd"] = (df["Curricular_units_2nd_sem_enrolled"] - df["Curricular_units_2nd_sem_approved"]) / (
-            df["Curricular_units_2nd_sem_enrolled"] + eps
-        )
+    # 2nd semester rates
+    if "Curricular_units_2nd_sem_approved" in df.columns and "Curricular_units_2nd_sem_enrolled" in df.columns:
+        enrolled2 = df["Curricular_units_2nd_sem_enrolled"]
+        approved2 = df["Curricular_units_2nd_sem_approved"]
+        df["approval_rate_2nd"] = approved2 / (enrolled2 + eps)
+        df["failure_rate_2nd"] = (enrolled2 - approved2) / (enrolled2 + eps)
 
-    if {"Curricular_units_1st_sem_grade", "Curricular_units_2nd_sem_grade"}.issubset(df.columns):
+    # Average grade
+    if "Curricular_units_1st_sem_grade" in df.columns and "Curricular_units_2nd_sem_grade" in df.columns:
         df["grade_avg"] = (df["Curricular_units_1st_sem_grade"] + df["Curricular_units_2nd_sem_grade"]) / 2
 
-    # Drop original columns used to create new features
+    # Drop columns that were used to create derived features
     cols_to_drop = [
         "Curricular_units_1st_sem_enrolled",
         "Curricular_units_1st_sem_approved",
@@ -339,15 +221,15 @@ def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
         "Curricular_units_1st_sem_grade",
         "Curricular_units_2nd_sem_grade",
     ]
-    return df.drop(columns=[c for c in cols_to_drop if c in df.columns], errors="ignore")
+    for col in cols_to_drop:
+        if col in df.columns:
+            df.drop(columns=[col], inplace=True)
 
+    return df
 
-def impute_numeric_median(df: pd.DataFrame, numeric_cols: Optional[List[str]] = None) -> pd.DataFrame:
+def impute_numeric_median(df: pd.DataFrame, numeric_cols: List[str]) -> pd.DataFrame:
     """Impute missing numeric values with median."""
     df = df.copy()
-    if numeric_cols is None:
-        numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-
     for col in numeric_cols:
         if col in df.columns:
             series = pd.to_numeric(df[col], errors="coerce")
@@ -358,102 +240,79 @@ def impute_numeric_median(df: pd.DataFrame, numeric_cols: Optional[List[str]] = 
                 df[col] = series.fillna(0)
     return df
 
-
 def cap_numeric_bounds(df: pd.DataFrame, bounds: Dict[str, Tuple[float, float]]) -> pd.DataFrame:
-    """Apply Winsorization using pre‑computed bounds."""
+    """Apply winsorization using pre‑computed bounds."""
     df = df.copy()
-    for col, (lower, upper) in bounds.items():
+    for col, (low, high) in bounds.items():
         if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce").clip(lower, upper)
+            df[col] = pd.to_numeric(df[col], errors="coerce").clip(low, high)
     return df
 
-
 def align_features(df: pd.DataFrame, feature_names: List[str]) -> pd.DataFrame:
-    """Ensure the DataFrame has all expected features, in the correct order."""
+    """Ensure DataFrame has all expected features in correct order."""
     df = df.copy()
+    # Add missing columns with default 0
     for col in feature_names:
         if col not in df.columns:
             df[col] = 0
+    # Ensure correct order
     return df[feature_names]
 
-
-def to_label(col: str, value):
-    """Convert numeric code to readable label using DISPLAY_MAPPINGS."""
-    if pd.isna(value):
-        return value
-    mapping = DISPLAY_MAPPINGS.get(col, {})
-    try:
-        code = int(float(value))
-    except Exception:
-        return value
-    return mapping.get(code, f"Code {code}")
-
-
-def add_label_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """Add human‑readable label columns for columns that have a mapping."""
-    out = df.copy()
-    for col in DISPLAY_MAPPINGS:
-        if col in out.columns:
-            out[f"{col}_label"] = out[col].apply(lambda v: to_label(col, v))
-    return out
-
-
-def round_floats(df: pd.DataFrame, decimals: int = 3) -> pd.DataFrame:
-    """Round all float columns to the specified number of decimals."""
-    df = df.copy()
-    for col in df.select_dtypes(include=[float]).columns:
-        df[col] = df[col].round(decimals)
-    return df
-
-
-def predict_from_dataframe(input_df: pd.DataFrame):
-    """Full pipeline: normalization, feature engineering, imputation, capping, prediction."""
+# ---------------------------------------------------------------------
+# 5. Prediction pipeline
+# ---------------------------------------------------------------------
+def predict_from_dataframe(input_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Full prediction pipeline:
+        - Normalize columns
+        - Feature engineering
+        - Impute missing numeric values with median
+        - Winsorization using bounds
+        - Align features
+        - Predict
+        - Add probability columns and risk level
+    """
     model, bounds, numeric_cols, feature_names, label_encoder = load_artifacts()
 
     # 1. Normalize column names
     df = normalize_columns(input_df)
 
-    # 2. Convert text labels to codes where possible
-    df = coerce_numeric_like_columns(df)
-
-    # 3. Feature engineering (adds derived columns, drops raw ones)
+    # 2. Feature engineering (adds derived columns)
     df = engineer_features(df)
 
-    # 4. Prepare features for prediction (drop any target column if present)
+    # 3. Separate features for prediction
     features_df = df.drop(columns=["Status"], errors="ignore")
 
-    # 5. Impute missing numeric values with median
-    features_df = impute_numeric_median(features_df, numeric_cols=numeric_cols)
+    # 4. Impute missing values
+    features_df = impute_numeric_median(features_df, numeric_cols)
 
-    # 6. Apply Winsorization (capping) using pre‑computed bounds
-    features_df = cap_numeric_bounds(features_df, bounds=bounds)
+    # 5. Cap extreme values
+    features_df = cap_numeric_bounds(features_df, bounds)
 
-    # 7. Align to the feature set used during training
-    features_df = align_features(features_df, feature_names=feature_names)
+    # 6. Align to training features
+    features_df = align_features(features_df, feature_names)
 
-    # 8. Predict
+    # 7. Predict
     pred_codes = model.predict(features_df)
     pred_proba = model.predict_proba(features_df)
     pred_labels = label_encoder.inverse_transform(pred_codes)
 
-    # 9. Build output DataFrame with original input + derived + predictions
+    # 8. Build output DataFrame
     output_df = input_df.copy()
-    # Add normalized columns and derived features for readability
+    # Add normalized and engineered columns for readability (optional)
     output_df = normalize_columns(output_df)
-    output_df = coerce_numeric_like_columns(output_df)
-    output_df = engineer_features(output_df)
-    output_df = add_label_columns(output_df)
+    output_df = engineer_features(output_df)   # this will add derived features again
 
     output_df["Predicted_Status_Code"] = pred_codes
     output_df["Predicted_Status"] = pred_labels
 
-    # Determine class indices (assume classes are [0,1] with 1 = Graduate)
-    class_to_index = {int(cls): idx for idx, cls in enumerate(model.classes_)}
-    output_df["Prob_Dropout"] = pred_proba[:, class_to_index.get(0, 0)] if 0 in class_to_index else np.nan
-    output_df["Prob_Graduate"] = pred_proba[:, class_to_index.get(1, 1)] if 1 in class_to_index else np.nan
+    # Map class indices (model classes are [0,1] where 1=Graduate, 0=Dropout)
+    class_to_idx = {int(cls): idx for idx, cls in enumerate(model.classes_)}
+    output_df["Prob_Dropout"] = pred_proba[:, class_to_idx.get(0, 0)]
+    output_df["Prob_Graduate"] = pred_proba[:, class_to_idx.get(1, 1)]
     output_df["Prediction_Confidence"] = np.max(pred_proba, axis=1)
 
-    # Add risk group based on probability of Dropout
+    # Risk level based on dropout probability (as in notebook: High >0.7, Medium 0.3‑0.7, Low <0.3)
     def risk_level(prob_dropout):
         if pd.isna(prob_dropout):
             return "Unknown"
@@ -465,19 +324,18 @@ def predict_from_dataframe(input_df: pd.DataFrame):
 
     output_df["Risk_Level"] = output_df["Prob_Dropout"].apply(risk_level)
 
-    # Round floats to 3 decimals
-    output_df = round_floats(output_df)
+    # Round floats to 3 decimals for readability
+    for col in output_df.select_dtypes(include=[float]).columns:
+        output_df[col] = output_df[col].round(3)
 
     return output_df
 
-
 # ---------------------------------------------------------------------
-# Streamlit UI
+# 6. Streamlit UI
 # ---------------------------------------------------------------------
 st.title("Student Dropout Predictor")
-st.caption("Predicts whether a student will Dropout or Graduate (binary classification) based on academic, demographic, and socio‑economic features.")
+st.caption("Predicts whether a student will Dropout or Graduate based on academic, demographic, and socio‑economic features.")
 
-# Sidebar controls
 with st.sidebar:
     st.header("Run prediction")
     csv_path = st.text_input("Input CSV", value="data.csv")
@@ -487,19 +345,18 @@ with st.sidebar:
     st.markdown("---")
     if st.button("Exit Application"):
         st.info("Exiting Streamlit app...")
-        sys.exit(0)  # Stops the Streamlit server
+        sys.exit(0)
 
 st.markdown(
     """
     **How it works**
     1. Load your local CSV file (semicolon‑separated recommended).
     2. Normalize column names to match the training dataset.
-    3. Convert coded values into readable labels where descriptions are available.
-    4. Apply feature engineering (approval rates, failure rates, average grade).
-    5. Impute missing values with median.
-    6. Cap extreme values using pre‑computed bounds (Winsorization).
-    7. Run the trained Random Forest model.
-    8. Save predictions with probabilities and risk groups.
+    3. Apply feature engineering (approval rates, failure rates, average grade).
+    4. Impute missing values with median.
+    5. Cap extreme values using pre‑computed bounds (Winsorization).
+    6. Run the trained Random Forest model.
+    7. Save predictions with probabilities and risk groups.
     """
 )
 
@@ -517,7 +374,7 @@ if run_btn:
         out_path = Path(output_path)
         pred_df.to_csv(out_path, index=False)
 
-        # Summary metrics (only Dropout/Graduate)
+        # Summary metrics
         total = len(pred_df)
         dropout_count = int((pred_df["Predicted_Status"] == "Dropout").sum())
         graduate_count = int((pred_df["Predicted_Status"] == "Graduate").sum())

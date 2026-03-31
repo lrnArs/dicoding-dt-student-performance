@@ -3,16 +3,17 @@
 ## Business Understanding
 Institusi pendidikan sering menghadapi kesulitan dalam memonitor dan meningkatkan performa siswa secara konsisten. Dengan banyaknya variabel yang mempengaruhi hasil akademik (seperti kebiasaan belajar, kehadiran, dan faktor sosial), diperlukan pendekatan berbasis data untuk membantu pengambilan keputusan yang lebih akurat.
 
-Proyek ini bertujuan untuk membangun sistem machine learning yang mampu memprediksi performa siswa serta menyediakan dashboard untuk monitoring dan analisis.
+Proyek ini bertujuan untuk membangun sistem machine learning yang mampu :
+1. Mengidentifikasi siswa yang berisiko dropout lebih awal, 
+2. Memberikan bimbingan atau intervensi tepat waktu, 
+3. Meningkatkan retensi dan kualitas lulusan
 
 ### Permasalahan Bisnis
-Permasalahan Bisnis
-- Sulit mengidentifikasi siswa yang berpotensi memiliki performa rendah sejak dini
-- Tidak adanya sistem berbasis data untuk mendukung keputusan akademik
-- Kurangnya visibilitas terhadap faktor-faktor yang mempengaruhi performa siswa
+- Sulit mendeteksi siswa yang berpotensi dropout
+- Proses Identifikasi secara manual kurang efisien dan memakan waktu
 
 ### Cakupan Proyek
-- Exploratory Data Analysis (EDA) terhadap data performa siswa
+- Exploratory Data Analysis (EDA) terhadap data siswa
 - Feature engineering untuk meningkatkan kualitas model
 - Training model machine learning (Random Forest)
 - Penyimpanan model dan artifacts (encoder, feature list, bounds)
@@ -58,23 +59,22 @@ Fitur utama dashboard:
 Prototype sistem machine learning dibuat pada app.py
 
 Fungsi utama:
-
-Input data siswa
-- Preprocessing otomatis:
-Imputation (median)
-Winsorization (berdasarkan bounds training)
-Feature engineering (approval rate)
-- Prediksi status siswa menggunakan model Random Forest terbaik
+Prediksi kemungkinan siswa dropout menggunakan model Random Forest terbaik
 
 Cara menjalankan:
-
+pastikan environment sudah disetup
+Generate File Prediksi terlebih dahulu
+```
+streamlit run app.py
+```
+Untuk Dashboard dapat gunakan
 ```
 streamlit run dashboard.py
 ```
 
 deployment notes
 ```
-Pastikan file berikut tersedia:
+Pastikan file berikut tersedia pada folder:
 best_model.pkl
 bounds.pkl
 numeric_cols.pkl
@@ -83,13 +83,9 @@ label_encoder.pkl
 ```
 
 ## Conclusion
-Dengan memanfaatkan machine learning, institusi pendidikan dapat:
-
-- Memprediksi performa siswa secara lebih akurat
-- Mengidentifikasi risiko lebih awal
-- Mengoptimalkan strategi pembelajaran
-
-Model yang dibangun mampu menangkap pola dari data historis dan memberikan insight yang actionable.
+- Random Forest baseline menunjukkan performa baik dengan ROC AUC > 0.95
+- Threshold prediksi dapat disesuaikan untuk memaksimalkan deteksi Dropout
+- Dashboard dan prototype memungkinkan institusi untuk memantau siswa dan memberikan intervensi tepat waktu sebelum mereka dropout 
 
 ### Rekomendasi Action Items
 - Implementasikan sistem monitoring performa siswa secara real-time
