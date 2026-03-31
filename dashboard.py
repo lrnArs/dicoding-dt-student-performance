@@ -274,9 +274,9 @@ with col_left:
 
     # Display metrics
     st.metric("Total Enrolled", f"{total_enrolled:,}")
-    st.metric("High Risk (Dropout >70%)", f"{high_risk:,}", delta=f"{high_risk/total_enrolled:.1%}")
-    st.metric("Medium Risk (30%–70%)", f"{medium_risk:,}", delta=f"{medium_risk/total_enrolled:.1%}")
-    st.metric("Low Risk (Dropout ≤30%)", f"{low_risk:,}", delta=f"{low_risk/total_enrolled:.1%}")
+    st.metric("High Risk (Dropout >70%)", f"{high_risk:,}")
+    st.metric("Medium Risk (30%–70%)", f"{medium_risk:,}")
+    st.metric("Low Risk (Dropout ≤30%)", f"{low_risk:,}")
 
 with col_right:
     st.markdown("### Risk Distribution")
