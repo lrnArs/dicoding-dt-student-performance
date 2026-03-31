@@ -50,10 +50,10 @@ Access Public : [Students_Performance](http://dicoding-dt-student-performance-eh
 
 Fitur utama dashboard: 
 
-- Distribusi nilai siswa
-- Analisis faktor-faktor yang mempengaruhi performa
-- Visualisasi data (histogram, correlation, dll)
-- Monitoring performa secara keseluruhan
+- Melihat Total Siswa baik yang sudah lulus, dropout atau enrolled
+- Melihat prediksi Kemungkinan dropout dalam 3 level risiko
+- Visualisasi data
+- Table Siswa 
 
 ## Menjalankan Sistem Machine Learning
 Prototype sistem machine learning dibuat pada app.py
@@ -85,9 +85,9 @@ label_encoder.pkl
 ## Conclusion
 - Random Forest baseline menunjukkan performa baik dengan ROC AUC > 0.95
 - Threshold prediksi dapat disesuaikan untuk memaksimalkan deteksi Dropout
-- Dashboard dan prototype memungkinkan institusi untuk memantau siswa dan memberikan intervensi tepat waktu sebelum mereka dropout 
+- Dashboard dan prototype memungkinkan institusi untuk memantau siswa dan memberikan intervensi tepat waktu sebelum dropout
 
 ### Rekomendasi Action Items
-- Implementasikan sistem monitoring performa siswa secara real-time
-- Gunakan hasil prediksi untuk intervensi dini pada siswa berisiko
-- Integrasikan sistem dengan database akademik internal
+- Implementasikan sistem monitoring potensi dropout pada siswa secara real-time
+- Gunakan hasil prediksi untuk intervensi dini pada siswa berisiko dropout khususnya dengan risik level High
+- Integrasikan sistem dengan database akademik internal, untuk source data yang lebih baik
