@@ -258,6 +258,64 @@ with col3:
 
 st.markdown("---")
 
+
+# ---------------------------------------------------------------------
+# 5.5. Prediction summary & risk distribution (based on dropout probability)
+# ---------------------------------------------------------------------
+
+# Filter enrolled students
+enrolled = df[df["Original_Status"].astype(str).str.strip() == "Enrolled"].copy()
+
+if len(enrolled) == 0:
+    st.warning("No enrolled students found in the dataset.")
+else:
+    col_left, col_right = st.columns(2)
+
+    with col_left:
+        st.markdown("### Predicted Dropout Risk (Enrolled Students)")
+
+        # Define risk categories based on dropout probability (0=Graduate, 1=Dropout)
+        high_risk = (enrolled["Prob_Dropout"] > 0.7).sum()
+        medium_risk = ((enrolled["Prob_Dropout"] > 0.3) & (enrolled["Prob_Dropout"] <= 0.7)).sum()
+        low_risk = (enrolled["Prob_Dropout"] <= 0.3).sum()
+        total_enrolled = len(enrolled)
+
+        # Display metrics
+        st.metric("Total Enrolled", f"{total_enrolled:,}")
+        st.metric("High Risk (Dropout >70%)", f"{high_risk:,}")
+        st.metric("Medium Risk (30%–70%)", f"{medium_risk:,}")
+        st.metric("Low Risk (Dropout ≤30%)", f"{low_risk:,}")
+
+    with col_right:
+        st.markdown("### Risk Distribution")
+        # Prepare data for pie chart
+        risk_counts = pd.DataFrame({
+            "Risk Level": ["High risk", "Medium risk", "Low risk"],
+            "Count": [high_risk, medium_risk, low_risk]
+        })
+        # Filter out zero-count categories if needed
+        risk_counts = risk_counts[risk_counts["Count"] > 0]
+
+        fig_pie = px.pie(
+            risk_counts,
+            values="Count",
+            names="Risk Level",
+            color="Risk Level",
+            color_discrete_map={
+                "High risk": "#de425b",
+                "Medium risk": "#ffeeda",
+                "Low risk": "#488f31"
+            },
+            title="Dropout Risk Level (Enrolled Students)",
+            hole=0.4,
+        )
+        fig_pie.update_traces(textposition="inside", textinfo="percent+label")
+        fig_pie.update_layout(height=400)
+        st.plotly_chart(fig_pie, use_container_width=True)
+
+    st.markdown("---")
+
+
 # ---------------------------------------------------------------------
 # 6. Multivariate visualizations: categorical features
 # ---------------------------------------------------------------------
