@@ -47,10 +47,13 @@ streamlit run app.py
 streamlit run dashboard.py
 ```
 
+Untuk mengakses Aplikasi
+[Aplication Prediction](https://dicoding-dt-student-performance-myamavbdibfkjdguex2jrp.streamlit.app/)
+
 ## Business Dashboard
 Dashboard dibuat menggunakan Streamlit untuk memberikan insight terkait performa siswa secara interaktif.
 
-Access Public : [Students_Performance](http://dicoding-dt-student-performance-ehpxtef5qtgfuxztaclsf5.streamlit.app)
+Access Public : [Dashboard](http://dicoding-dt-student-performance-ehpxtef5qtgfuxztaclsf5.streamlit.app)
 
 Fitur utama dashboard: 
 
